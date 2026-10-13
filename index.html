@@ -1,0 +1,1462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Where Is It? AR Beach Challenge</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --safe-top: env(safe-area-inset-top, 0px);
+            --safe-bottom: env(safe-area-inset-bottom, 0px);
+            --chibi-border: 4px solid #1e293b;
+            --chibi-shadow: 4px 4px 0px 0px #1e293b;
+        }
+
+        body {
+            font-family: 'Fredoka', sans-serif;
+            margin: 0;
+            padding: 0;
+            overflow: hidden; /* No scrolling */
+            background-color: #87CEEB; /* Sky blue fallback */
+            touch-action: none; /* Prevent native touch gestures for custom dragging */
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        /* Container that maintains mobile proportions and bounds */
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            max-width: 430px;
+            margin: 0 auto;
+            background: linear-gradient(to bottom, #4DD0E1 0%, #B2EBF2 60%, #FFF59D 60%, #FFE082 100%);
+            overflow: hidden;
+            box-shadow: 0 0 20px rgba(0,0,0,0.2);
+        }
+
+        /* Video and Canvas Layers */
+        #webcam-video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1); /* Mirror camera */
+            z-index: 1;
+            display: none; /* Hidden until started */
+        }
+
+        #ar-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+            pointer-events: none;
+        }
+
+        /* UI Overlay Layer */
+        #ui-layer {
+            position: absolute;
+            top: var(--safe-top);
+            bottom: var(--safe-bottom);
+            left: 0;
+            right: 0;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            pointer-events: none; /* Let clicks pass through unless on specific elements */
+        }
+
+        /* Enable pointer events only on interactive UI elements */
+        .interactive {
+            pointer-events: auto;
+        }
+
+        .chibi-btn {
+            background-color: #FF7043; /* Bright Orange */
+            color: white;
+            font-weight: 700;
+            font-size: 1.5rem;
+            padding: 0.75rem 2rem;
+            border-radius: 9999px;
+            border: var(--chibi-border);
+            box-shadow: var(--chibi-shadow);
+            transition: transform 0.1s, box-shadow 0.1s;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .chibi-btn:active {
+            transform: translate(4px, 4px);
+            box-shadow: 0px 0px 0px 0px #1e293b;
+        }
+        .chibi-btn.alt {
+            background-color: #66BB6A; /* Green */
+        }
+        .chibi-btn.disabled {
+            background-color: #B0BEC5;
+            pointer-events: none;
+            opacity: 0.8;
+        }
+
+        .chibi-card {
+            background-color: white;
+            border: var(--chibi-border);
+            border-radius: 1.5rem;
+            box-shadow: var(--chibi-shadow);
+            padding: 1.5rem;
+            text-align: center;
+        }
+        
+        .chibi-input {
+            border: var(--chibi-border);
+            border-radius: 1rem;
+            padding: 0.75rem 1rem;
+            font-size: 1.25rem;
+            font-family: 'Fredoka', sans-serif;
+            text-align: center;
+            outline: none;
+            width: 80%;
+            max-width: 300px;
+        }
+        .chibi-input:focus {
+            border-color: #29B6F6;
+        }
+
+        #ar-cursor {
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            background-color: rgba(255, 255, 255, 0.8);
+            border: 4px solid #FFCA28;
+            border-radius: 50%;
+            top: 0; left: 0;
+            transform: translate(-50%, -50%);
+            z-index: 9999;
+            pointer-events: none;
+            box-shadow: 0 0 15px rgba(255, 202, 40, 0.8);
+            display: none;
+            transition: width 0.1s, height 0.1s, background-color 0.1s;
+        }
+        #ar-cursor.pinching {
+            width: 30px;
+            height: 30px;
+            background-color: #FFCA28;
+            border-color: #FF8F00;
+        }
+
+        /* Draggable Items */
+        .draggable {
+            background-color: #FFF9C4;
+            border: 3px solid #1e293b;
+            border-radius: 1rem;
+            padding: 0.5rem 1rem;
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #1e293b;
+            box-shadow: 3px 3px 0px 0px #1e293b;
+            position: absolute;
+            touch-action: none;
+            user-select: none;
+            z-index: 50;
+            text-align: center;
+            min-width: 80px;
+        }
+        .draggable.is-grabbed {
+            z-index: 9990;
+            box-shadow: 6px 6px 0px 0px rgba(30, 41, 59, 0.5);
+            transform: scale(1.1);
+        }
+
+        .dropzone {
+            background-color: rgba(255, 255, 255, 0.5);
+            border: 3px dashed #1e293b;
+            border-radius: 1rem;
+            min-width: 100px;
+            min-height: 50px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 0.5rem;
+            transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        .dropzone.highlight {
+            background-color: #fef08a !important; /* Bright Yellow */
+            border-color: #f59e0b !important; /* Amber */
+            border-style: solid !important;
+            box-shadow: 0 0 25px 8px rgba(245, 158, 11, 0.7) !important;
+            transform: scale(1.05);
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+        .floating { animation: float 3s ease-in-out infinite; }
+
+        @keyframes popIn {
+            0% { transform: scale(0.5); opacity: 0; }
+            70% { transform: scale(1.1); opacity: 1; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .pop-in { animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+
+        @keyframes sparkleAnim {
+            0% { transform: scale(0) rotate(0deg); opacity: 1; }
+            100% { transform: scale(1.5) rotate(180deg); opacity: 0; }
+        }
+        .sparkle {
+            position: absolute;
+            font-size: 2rem;
+            pointer-events: none;
+            animation: sparkleAnim 0.8s ease-out forwards;
+        }
+
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-10px); }
+            75% { transform: translateX(10px); }
+        }
+        .shake-anim { animation: shake 0.3s ease-in-out; }
+
+        @keyframes splashAnim {
+            0% { transform: scale(0.5); opacity: 1; }
+            100% { transform: scale(3); opacity: 0; }
+        }
+        .splash-effect {
+            position: absolute;
+            pointer-events: none;
+            z-index: 99999;
+            font-size: 4rem;
+            animation: splashAnim 0.4s ease-out forwards;
+            transform: translate(-50%, -50%);
+        }
+
+        @keyframes fall {
+            0% { transform: translateY(-20vh) rotate(0deg); opacity: 1; }
+            100% { transform: translateY(120vh) rotate(720deg); opacity: 0; }
+        }
+        .confetti-piece {
+            position: absolute;
+            top: -20vh;
+            animation: fall linear forwards;
+            z-index: 9999;
+            pointer-events: none;
+        }
+
+        /* Screen Visibility Classes */
+        .screen {
+            display: none;
+            width: 100%;
+            height: 100%;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            position: absolute;
+            top: 0; left: 0;
+        }
+        .screen.active {
+            display: flex;
+        }
+
+        /* Semi-transparent text backdrop for AR */
+        .text-backdrop {
+            background-color: rgba(255, 255, 255, 0.85);
+            padding: 0.5rem 1rem;
+            border-radius: 1rem;
+            border: 3px solid #1e293b;
+            display: inline-block;
+        }
+
+        /* Top Progress Bar */
+        #progress-bar {
+            position: absolute;
+            top: 1rem;
+            left: 0;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            z-index: 100;
+        }
+        #progress-text {
+            font-size: 1.2rem;
+            font-weight: 900;
+            color: white;
+            -webkit-text-stroke: 1px #1e293b;
+            text-shadow: 2px 2px 0 #1e293b;
+            letter-spacing: 0.1em;
+            margin-bottom: 0.2rem;
+        }
+        #progress-dots-container {
+            display: flex;
+            gap: 0.5rem;
+        }
+        .progress-dot {
+            font-size: 1.2rem;
+            color: #1e293b;
+            text-shadow: 0 0 5px white;
+        }
+
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <!-- Camera feeds -->
+    <video id="webcam-video" autoplay playsinline></video>
+    <canvas id="ar-canvas"></canvas>
+
+    <!-- AR Cursor -->
+    <div id="ar-cursor"></div>
+
+    <!-- UI Overlay Layer -->
+    <div id="ui-layer">
+
+        <div id="screen-start" class="screen active p-4 text-center">
+            <div class="pop-in flex flex-col items-center w-full">
+                <div class="text-6xl mb-2 floating">🦀</div>
+                <h1 class="text-5xl font-black text-white drop-shadow-lg mb-2" style="-webkit-text-stroke: 2px #1e293b;">WHERE IS IT?</h1>
+                <div class="bg-yellow-400 text-slate-800 font-bold px-4 py-2 rounded-full border-4 border-slate-800 shadow-[4px_4px_0_0_#1e293b] mb-6 transform -rotate-2">
+                    AR BEACH CHALLENGE
+                </div>
+                
+                <p class="text-xl font-bold text-white mb-8 bg-blue-500/80 px-4 py-1 rounded-full border-2 border-white">
+                    IN • ON • UNDER • NEXT TO
+                </p>
+
+                <div class="chibi-card interactive w-full max-w-xs mb-8">
+                    <label class="block text-xl font-bold mb-2 text-slate-700">Your Name:</label>
+                    <input type="text" id="pupil-name" class="chibi-input mb-4" placeholder="e.g. Ali" autocomplete="off">
+                    <button id="btn-start" class="chibi-btn w-full">START AR GAME</button>
+                </div>
+                
+                <div class="flex gap-4 text-4xl mt-4">
+                    <span class="floating" style="animation-delay: 0.2s">🐚</span>
+                    <span class="floating" style="animation-delay: 0.4s">🏰</span>
+                    <span class="floating" style="animation-delay: 0.6s">🏐</span>
+                    <span class="floating" style="animation-delay: 0.8s">⭐</span>
+                </div>
+            </div>
+        </div>
+
+        <div id="screen-loading" class="screen p-4 text-center bg-sky-300/90 z-50">
+            <div class="chibi-card">
+                <div class="text-5xl animate-spin mb-4">🌀</div>
+                <h2 class="text-2xl font-bold text-slate-800" id="loading-text">Starting Camera...</h2>
+                <p class="text-sm font-bold text-slate-600 mt-2">Loading Magic AI...</p>
+            </div>
+        </div>
+
+        <div id="screen-calibration" class="screen p-4 text-center">
+            <div class="chibi-card interactive w-full max-w-xs pop-in border-4 border-blue-500">
+                <div class="text-6xl mb-4" id="calib-icon">🖐️</div>
+                <h2 class="text-3xl font-bold text-slate-800 mb-2" id="calib-title">Show your hand!</h2>
+                <p class="text-lg font-semibold text-slate-600 mb-6" id="calib-desc">Hold your hand in front of the camera.</p>
+                <div class="flex gap-2 justify-center mb-6" id="calib-dots">
+                    <div class="w-3 h-3 rounded-full bg-blue-500"></div>
+                    <div class="w-3 h-3 rounded-full bg-gray-300"></div>
+                    <div class="w-3 h-3 rounded-full bg-gray-300"></div>
+                </div>
+                <button id="btn-calib-next" class="chibi-btn alt w-full">NEXT</button>
+            </div>
+        </div>
+
+        <div id="screen-game" class="screen">
+            <!-- Progress Bar -->
+            <div id="progress-bar">
+                <div id="progress-text">STAGE 1 / 4</div>
+                <div id="progress-dots-container">
+                    <span class="progress-dot">●</span>
+                    <span class="progress-dot">○</span>
+                    <span class="progress-dot">○</span>
+                    <span class="progress-dot">○</span>
+                </div>
+            </div>
+
+            <!-- Stage Container (Dynamic Content) -->
+            <div id="stage-container" class="w-full h-full relative interactive">
+                <!-- Content will be injected here by Stage Manager -->
+            </div>
+        </div>
+        
+        <div id="screen-teaching-stage2" class="screen bg-sky-200/95 z-[9900] p-4 text-center">
+            <div class="chibi-card interactive w-full max-w-sm pop-in border-4 border-blue-400">
+                <h1 class="text-4xl font-black mb-4 text-slate-800" style="-webkit-text-stroke: 1px white;">IT'S or THEY'RE?</h1>
+                
+                <div class="flex flex-col gap-4 mb-6">
+                    <div class="bg-white p-3 rounded-2xl border-4 border-green-400 shadow-sm flex flex-col items-center">
+                        <div class="text-4xl mb-1">🍎</div>
+                        <div class="text-xl font-bold text-slate-700">ONE THING</div>
+                        <div class="text-3xl font-black text-green-600">IT'S</div>
+                        <div class="text-sm font-bold text-slate-500 mt-1">It's in the bag.</div>
+                    </div>
+                    
+                    <div class="bg-white p-3 rounded-2xl border-4 border-purple-400 shadow-sm flex flex-col items-center">
+                        <div class="text-4xl mb-1 flex justify-center gap-1">🍎🍎</div>
+                        <div class="text-xl font-bold text-slate-700">TWO OR MORE</div>
+                        <div class="text-3xl font-black text-purple-600">THEY'RE</div>
+                        <div class="text-sm font-bold text-slate-500 mt-1">They're on the sand.</div>
+                    </div>
+                </div>
+                
+                <button id="btn-start-stage2" class="chibi-btn w-full">LET'S PLAY!</button>
+            </div>
+        </div>
+
+        <div id="screen-feedback" class="screen bg-black/40 z-[9999] p-4">
+            <div id="feedback-card" class="chibi-card interactive w-full max-w-sm pop-in">
+                <h1 id="feedback-title" class="text-4xl font-black mb-2 text-yellow-500" style="-webkit-text-stroke: 1px #1e293b;">WELL DONE! ⭐</h1>
+                <p id="feedback-desc" class="text-2xl font-bold text-slate-700 mb-6 py-2 px-4 bg-gray-100 rounded-xl border-2 border-slate-300">It's under the chair.</p>
+                <button id="btn-next-question" class="chibi-btn w-full">NEXT</button>
+            </div>
+        </div>
+
+        <div id="screen-stage-complete" class="screen bg-sky-400/90 z-[10000] p-4 text-center">
+            <div class="chibi-card interactive w-full max-w-sm pop-in border-4 border-yellow-400">
+                <h1 class="text-4xl font-black mb-2 text-slate-800" id="stage-complete-title">STAGE 1 COMPLETE! ⭐</h1>
+                <div id="stage-complete-content" class="flex flex-col justify-center items-center gap-1 text-xl font-bold text-blue-600 mb-6 bg-blue-100 rounded-xl p-3 border-2 border-blue-300">
+                    IN • ON • UNDER • NEXT TO
+                </div>
+                <button id="btn-next-stage" class="chibi-btn alt w-full">NEXT STAGE</button>
+            </div>
+        </div>
+
+        <!-- NEW FINAL CELEBRATION SCREEN -->
+        <div id="screen-final-celebration" class="screen bg-sky-900/60 z-[10000] p-4 text-center overflow-hidden">
+            <div id="confetti-container" class="absolute inset-0 pointer-events-none"></div>
+
+            <div class="chibi-card interactive w-full max-w-sm pop-in border-4 border-yellow-400 relative z-10 flex flex-col items-center max-h-[95vh] overflow-y-auto" style="-ms-overflow-style: none; scrollbar-width: none;">
+                <h1 class="text-4xl font-black mb-1 text-yellow-400 drop-shadow-md leading-tight" style="-webkit-text-stroke: 1px #1e293b;">
+                    WELL DONE!<br><span class="text-3xl text-orange-500" id="final-pupil-name" style="-webkit-text-stroke: 1px #1e293b;">NAME</span>
+                </h1>
+                
+                <div class="text-xl font-black text-blue-600 mb-3 leading-tight">
+                    YOU COMPLETED<br>THE AR BEACH CHALLENGE!
+                </div>
+
+                <div class="bg-white/95 rounded-xl p-2 w-full font-bold border-2 border-blue-200 mb-2 shadow-sm">
+                    <div class="text-blue-700 text-lg mb-1 tracking-wider">IN • ON • UNDER • NEXT TO</div>
+                    <div class="border-t-2 border-dashed border-blue-200 my-1"></div>
+                    <div class="text-green-600 text-sm">ONE → IT'S</div>
+                    <div class="text-purple-600 text-sm">TWO OR MORE → THEY'RE</div>
+                </div>
+
+                <div class="bg-yellow-50 rounded-xl p-2 w-full font-bold border-2 border-yellow-300 mb-4 shadow-sm text-sm">
+                    <div class="text-slate-600">Where are the shells?</div>
+                    <div class="text-purple-700">They're on the sand.</div>
+                </div>
+
+                <div id="delayed-task" class="opacity-0 transition-opacity duration-700 mb-2 flex flex-col items-center w-full">
+                    <div class="text-4xl mb-1 floating">📝 ✏️</div>
+                    <div class="text-2xl font-black text-red-600 bg-yellow-300 px-2 py-2 rounded-2xl border-4 border-red-500 shadow-[4px_4px_0_0_#ef4444] w-full mb-2 tracking-tight leading-tight animate-bounce">
+                        NEXT TASK:<br>COMPLETE YESTERDAY'S WORKSHEET.
+                    </div>
+                    <div class="text-xs font-bold text-slate-700 bg-slate-100 px-2 py-1 rounded-lg border-2 border-slate-300 w-full">
+                        Write the answers in your 4-line exercise book.
+                    </div>
+                </div>
+
+                <div class="flex gap-2 w-full opacity-0 transition-opacity duration-700 mt-2" id="final-buttons">
+                    <button id="btn-home" class="chibi-btn w-1/2 bg-blue-500 text-sm py-3 px-1 border-[3px] border-[#1e293b] shadow-[3px_3px_0_0_#1e293b]">HOME</button>
+                    <button id="btn-play-again" class="chibi-btn alt w-1/2 text-sm py-3 px-1 border-[3px] border-[#1e293b] shadow-[3px_3px_0_0_#1e293b]">PLAY AGAIN</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<!-- MediaPipe Tasks Vision JS dependencies via Module -->
+<script type="module">
+    import {
+        FilesetResolver,
+        HandLandmarker
+    } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/vision_bundle.mjs";
+
+    // ==========================================
+    // GAME STATE ARCHITECTURE
+    // ==========================================
+    const State = {
+        pupilName: "",
+        stage: 1, // 1 to 4
+        questionIndex: 0,
+        score: 0,
+        isTransitioning: false,
+        cameraGranted: false,
+        hasTouchFallback: false
+    };
+
+    const InputState = {
+        x: window.innerWidth / 2,
+        y: window.innerHeight / 2,
+        isPinching: false,
+        wasPinching: false,
+        grabbedElement: null,
+        offsetX: 0,
+        offsetY: 0
+    };
+
+    // DOM Elements
+    const elements = {
+        screens: {
+            start: document.getElementById('screen-start'),
+            loading: document.getElementById('screen-loading'),
+            calibration: document.getElementById('screen-calibration'),
+            game: document.getElementById('screen-game'),
+            teachingStage2: document.getElementById('screen-teaching-stage2'),
+            feedback: document.getElementById('screen-feedback'),
+            stageComplete: document.getElementById('screen-stage-complete'),
+            finalCelebration: document.getElementById('screen-final-celebration')
+        },
+        video: document.getElementById('webcam-video'),
+        canvas: document.getElementById('ar-canvas'),
+        cursor: document.getElementById('ar-cursor'),
+        loadingText: document.getElementById('loading-text'),
+        stageContainer: document.getElementById('stage-container'),
+        progressBar: document.getElementById('progress-bar')
+    };
+
+    const ctx = elements.canvas.getContext('2d');
+    let handLandmarker = null;
+    let lastVideoTime = -1;
+    let animationFrameId = null;
+
+    // ==========================================
+    // UI MANAGER
+    // ==========================================
+    function showScreen(screenName) {
+        Object.values(elements.screens).forEach(el => el.classList.remove('active'));
+        elements.screens[screenName].classList.add('active');
+    }
+
+    function updateProgress() {
+        document.getElementById('progress-text').innerText = `STAGE ${State.stage} / 4`;
+        let html = '';
+        for (let i = 1; i <= 4; i++) {
+            html += `<span class="progress-dot">${i <= State.stage ? '●' : '○'}</span>`;
+        }
+        document.getElementById('progress-dots-container').innerHTML = html;
+    }
+
+    // ==========================================
+    // CAMERA & MEDIAPIPE MANAGER
+    // ==========================================
+    async function initCamera() {
+        elements.loadingText.innerText = "Accessing Camera...";
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } }
+            });
+            elements.video.srcObject = stream;
+            
+            return new Promise((resolve) => {
+                elements.video.onloadedmetadata = () => {
+                    elements.video.play();
+                    // Match canvas size to video aspect ratio logic if needed, 
+                    // but we rely on CSS absolute fill for overlay mapping.
+                    elements.canvas.width = elements.video.videoWidth;
+                    elements.canvas.height = elements.video.videoHeight;
+                    State.cameraGranted = true;
+                    resolve();
+                };
+            });
+        } catch (error) {
+            console.warn("Camera denied or unavailable. Fallback to touch only.", error);
+            State.cameraGranted = false;
+            State.hasTouchFallback = true;
+            elements.loadingText.innerText = "Camera not found. Touch mode enabled.";
+            setTimeout(() => { resolveCalibration(); }, 2000);
+            return false;
+        }
+    }
+
+    async function initMediaPipe() {
+        if (!State.cameraGranted) return;
+        elements.loadingText.innerText = "Loading AI Magic...";
+        try {
+            const vision = await FilesetResolver.forVisionTasks(
+                "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
+            );
+            handLandmarker = await HandLandmarker.createFromOptions(vision, {
+                baseOptions: {
+                    modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+                    delegate: "GPU"
+                },
+                runningMode: "VIDEO",
+                numHands: 1,
+                minHandDetectionConfidence: 0.6,
+                minHandPresenceConfidence: 0.6,
+                minTrackingConfidence: 0.6
+            });
+            elements.loadingText.innerText = "Ready!";
+        } catch (e) {
+            console.error("MediaPipe failed", e);
+            State.hasTouchFallback = true;
+        }
+    }
+
+    // ==========================================
+    // INPUT SYSTEM & PHYSICS (HAND + TOUCH)
+    // ==========================================
+    
+    // Smoothing variables (Exponential Moving Average)
+    let smoothX = window.innerWidth / 2;
+    let smoothY = window.innerHeight / 2;
+    const smoothingFactor = 0.4; // Lower is smoother but slower
+
+    function processHandLandmarks(results) {
+        if (results.landmarks && results.landmarks.length > 0) {
+            const landmarks = results.landmarks[0]; // 1 hand
+            
+            // Landmarks: 8 = Index tip, 4 = Thumb tip
+            const index = landmarks[8];
+            const thumb = landmarks[4];
+
+            // Map camera coordinates [0, 1] to screen dimensions.
+            // Remember camera is mirrored! So we flip X.
+            const screenW = window.innerWidth;
+            const screenH = window.innerHeight;
+            
+            const targetX = (1 - index.x) * screenW;
+            const targetY = index.y * screenH;
+
+            // Apply smoothing
+            smoothX = (smoothX * (1 - smoothingFactor)) + (targetX * smoothingFactor);
+            smoothY = (smoothY * (1 - smoothingFactor)) + (targetY * smoothingFactor);
+
+            InputState.x = smoothX;
+            InputState.y = smoothY;
+
+            // Pinch Detection (3D distance)
+            const dx = index.x - thumb.x;
+            const dy = index.y - thumb.y;
+            const dz = index.z - thumb.z;
+            const distance = Math.sqrt(dx*dx + dy*dy + dz*dz);
+            
+            // Threshold for pinch
+            InputState.isPinching = distance < 0.05;
+
+            // Show cursor
+            elements.cursor.style.display = 'block';
+            elements.cursor.style.left = `${InputState.x}px`;
+            elements.cursor.style.top = `${InputState.y}px`;
+            
+            if (InputState.isPinching) {
+                elements.cursor.classList.add('pinching');
+            } else {
+                elements.cursor.classList.remove('pinching');
+            }
+        } else {
+            // Hand lost
+            InputState.isPinching = false;
+            elements.cursor.style.display = 'none';
+            elements.cursor.classList.remove('pinching');
+        }
+    }
+
+    // Touch Fallback Bindings
+    document.addEventListener('touchstart', (e) => {
+        if (!State.hasTouchFallback && State.cameraGranted) return; // Ignore if AR is active
+        const t = e.touches[0];
+        InputState.x = t.clientX;
+        InputState.y = t.clientY;
+        InputState.isPinching = true; // Touch acts as pinch
+    }, {passive: false});
+
+    document.addEventListener('touchmove', (e) => {
+        if (!State.hasTouchFallback && State.cameraGranted) return;
+        const t = e.touches[0];
+        InputState.x = t.clientX;
+        InputState.y = t.clientY;
+    }, {passive: false});
+
+    document.addEventListener('touchend', () => {
+        if (!State.hasTouchFallback && State.cameraGranted) return;
+        InputState.isPinching = false;
+    });
+
+    function checkAABBCollision(rect1, rect2) {
+        return !(rect1.right < rect2.left || 
+                 rect1.left > rect2.right || 
+                 rect1.bottom < rect2.top || 
+                 rect1.top > rect2.bottom);
+    }
+
+    function triggerCelebration() {
+        const container = document.getElementById('confetti-container');
+        if (!container) return;
+        container.innerHTML = '';
+        const emojis = ['⭐', '🎉', '🐚', '🦀', '🏖️', '✨', '🏐'];
+        for(let i=0; i<35; i++) {
+            const el = document.createElement('div');
+            el.innerText = emojis[Math.floor(Math.random() * emojis.length)];
+            el.className = 'confetti-piece';
+            el.style.left = `${Math.random() * 100}%`;
+            el.style.fontSize = `${1.5 + Math.random() * 1.5}rem`;
+            el.style.animationDuration = `${2 + Math.random() * 3}s`;
+            el.style.animationDelay = `${Math.random() * 1}s`;
+            container.appendChild(el);
+        }
+    }
+
+    function createSplashEffect(x, y) {
+        const splash = document.createElement('div');
+        splash.innerText = '💦'; // Cute water blaster effect
+        splash.className = 'splash-effect';
+        splash.style.left = `${x}px`;
+        splash.style.top = `${y}px`;
+        document.body.appendChild(splash);
+        setTimeout(() => splash.remove(), 400); 
+    }
+
+    function handleDragAndDrop() {
+        if (State.isTransitioning) return;
+
+        if (State.stage === 4) {
+            // On Pinch Fire
+            if (InputState.isPinching && !InputState.wasPinching) {
+                // Spawn cute water blast at finger
+                createSplashEffect(InputState.x, InputState.y);
+                
+                elements.cursor.style.pointerEvents = "none";
+                const target = document.elementFromPoint(InputState.x, InputState.y);
+                const shootable = target ? target.closest('.shootable-target') : null;
+
+                if (shootable) {
+                    const selectedIndex = parseInt(shootable.dataset.index);
+                    const q = Stage4Data[State.questionIndex];
+                    
+                    if (selectedIndex === q.correctIndex) {
+                        // Correct Shot
+                        shootable.classList.remove('bg-sky-100', 'border-sky-600');
+                        shootable.classList.add('bg-green-400', 'border-green-600', 'scale-110');
+                        setTimeout(() => {
+                           FeedbackSystem.showCorrect(q.options[q.correctIndex]);
+                        }, 400);
+                    } else {
+                        // Wrong Shot
+                        shootable.classList.add('shake-anim', 'bg-red-300', 'border-red-500');
+                        setTimeout(() => {
+                            shootable.classList.remove('shake-anim', 'bg-red-300', 'border-red-500');
+                        }, 400);
+                        FeedbackSystem.showWrong("Look carefully at the picture!");
+                    }
+                }
+            }
+            InputState.wasPinching = InputState.isPinching;
+            return; // Exit here. Do not process drag and drop for Stage 4
+        }
+
+        // On Pinch Start
+        if (InputState.isPinching && !InputState.wasPinching) {
+            // Find element at cursor (temporarily hide cursor for raycast)
+            elements.cursor.style.pointerEvents = "none";
+            
+            // Find what we are pointing at
+            const target = document.elementFromPoint(InputState.x, InputState.y);
+            
+            if (target && (target.classList.contains('draggable') || target.closest('.draggable'))) {
+                const el = target.classList.contains('draggable') ? target : target.closest('.draggable');
+                InputState.grabbedElement = el;
+                
+                // Calculate offset so it doesn't snap to center immediately
+                const rect = el.getBoundingClientRect();
+                InputState.offsetX = InputState.x - (rect.left + rect.width/2);
+                InputState.offsetY = InputState.y - (rect.top + rect.height/2);
+                
+                el.classList.add('is-grabbed');
+                // Use transform for smooth movement
+                el.style.left = '50%'; // Reset absolute positioning
+                el.style.top = '50%';
+                el.style.marginLeft = `-${rect.width/2}px`;
+                el.style.marginTop = `-${rect.height/2}px`;
+            }
+        }
+
+        // While Pinching
+        if (InputState.isPinching && InputState.grabbedElement) {
+            const el = InputState.grabbedElement;
+            // Move via transform based on center 50/50 point
+            const tx = InputState.x - window.innerWidth/2 - InputState.offsetX;
+            const ty = InputState.y - window.innerHeight/2 - InputState.offsetY;
+            el.style.transform = `translate(${tx}px, ${ty}px) scale(1.1)`;
+
+            // Highlight potential dropzones
+            const elRect = el.getBoundingClientRect();
+            document.querySelectorAll('.dropzone').forEach(zone => {
+                if (checkAABBCollision(elRect, zone.getBoundingClientRect())) {
+                    zone.classList.add('highlight');
+                } else {
+                    zone.classList.remove('highlight');
+                }
+            });
+        }
+
+        // On Pinch Release
+        if (!InputState.isPinching && InputState.wasPinching) {
+            if (InputState.grabbedElement) {
+                const el = InputState.grabbedElement;
+                const elRect = el.getBoundingClientRect();
+                el.classList.remove('is-grabbed');
+                el.style.transform = ''; // reset scaling
+                
+                let droppedOnZone = false;
+
+                // Check collision with dropzones
+                const zones = document.querySelectorAll('.dropzone');
+                for (let zone of zones) {
+                    zone.classList.remove('highlight');
+                    if (checkAABBCollision(elRect, zone.getBoundingClientRect())) {
+                        droppedOnZone = true;
+                        // Fire game logic event
+                        StageManager.handleDrop(el, zone);
+                        break;
+                    }
+                }
+
+                if (!droppedOnZone) {
+                    // Snap back to original position (handled by Game Logic or CSS)
+                    StageManager.resetDraggable(el);
+                }
+                
+                InputState.grabbedElement = null;
+            }
+        }
+
+        InputState.wasPinching = InputState.isPinching;
+    }
+
+    // ==========================================
+    // GAME LOOP
+    // ==========================================
+    function gameLoop() {
+        if (State.cameraGranted && handLandmarker && elements.video.currentTime !== lastVideoTime) {
+            lastVideoTime = elements.video.currentTime;
+            const results = handLandmarker.detectForVideo(elements.video, performance.now());
+            processHandLandmarks(results);
+        }
+
+        handleDragAndDrop();
+
+        animationFrameId = requestAnimationFrame(gameLoop);
+    }
+
+    // ==========================================
+    // FEEDBACK SYSTEM
+    // ==========================================
+    const FeedbackSystem = {
+        showCorrect: (fullSentenceHtml) => {
+            State.isTransitioning = true;
+            const fbScreen = elements.screens.feedback;
+            const title = document.getElementById('feedback-title');
+            const desc = document.getElementById('feedback-desc');
+            
+            title.innerText = "WELL DONE! ⭐";
+            title.className = "text-4xl font-black mb-2 text-yellow-500";
+            desc.innerHTML = fullSentenceHtml; // Use innerHTML for highlighting spans
+            desc.style.display = 'block';
+            
+            // Add sparkles
+            for(let i=0; i<5; i++) {
+                const s = document.createElement('div');
+                s.innerText = '✨';
+                s.className = 'sparkle';
+                s.style.left = `${20 + Math.random()*60}%`;
+                s.style.top = `${20 + Math.random()*60}%`;
+                document.getElementById('feedback-card').appendChild(s);
+                setTimeout(() => s.remove(), 800);
+            }
+
+            showScreen('feedback');
+            
+            // Auto setup next button
+            document.getElementById('btn-next-question').onclick = () => {
+                showScreen('game');
+                State.isTransitioning = false;
+                StageManager.nextQuestion();
+            };
+        },
+        
+        showWrong: (hintHtml) => {
+            State.isTransitioning = true;
+            const title = document.getElementById('feedback-title');
+            const desc = document.getElementById('feedback-desc');
+            
+            title.innerText = "TRY AGAIN!";
+            title.className = "text-4xl font-black mb-2 text-red-500";
+            desc.innerHTML = hintHtml || "Look carefully!"; // Use innerHTML for rich text formatting
+            
+            showScreen('feedback');
+            
+            document.getElementById('btn-next-question').onclick = () => {
+                showScreen('game');
+                State.isTransitioning = false;
+                // Don't advance question, let them retry
+            };
+        }
+    };
+
+    // ==========================================
+    // STAGE MANAGER (BASE ARCHITECTURE)
+    // ==========================================
+    const Stage1Data = [
+        { 
+            img: `<div class="relative w-full h-full"><div class="absolute bottom-2 left-1/2 -translate-x-1/2 text-7xl z-20">🪣</div><div class="absolute bottom-10 left-1/2 -translate-x-1/2 text-5xl z-10">🏐</div></div>`, 
+            question: "Where is the ball?", 
+            answer: "in", 
+            sentence: "It's in the bucket." 
+        },
+        { 
+            img: `<div class="relative w-full h-full"><div class="absolute bottom-6 left-1/2 -translate-x-1/2 text-7xl z-10" style="transform: translateX(-50%) scaleY(0.4);">🟩</div><div class="absolute bottom-10 left-1/2 -translate-x-1/2 text-6xl z-20">👒</div></div>`, 
+            question: "Where is the hat?", 
+            answer: "on", 
+            sentence: "It's on the mat." 
+        },
+        { 
+            img: `<div class="relative w-full h-full"><div class="absolute bottom-10 left-1/2 -translate-x-1/2 text-7xl z-20">🪑</div><div class="absolute bottom-2 left-1/2 -translate-x-1/2 text-5xl z-10">📷</div></div>`, 
+            question: "Where is the camera?", 
+            answer: "under", 
+            sentence: "It's under the bench." 
+        },
+        { 
+            img: `<div class="relative w-full h-full flex items-end justify-center gap-2 pb-6"><div class="text-7xl z-10">🏰</div><div class="text-6xl z-10">⛏️</div></div>`, 
+            question: "Where is the spade?", 
+            answer: "next to", 
+            sentence: "It's next to the sandcastle." 
+        },
+        { 
+            img: `<div class="relative w-full h-full"><div class="absolute bottom-2 left-1/2 -translate-x-1/2 w-28 h-8 bg-yellow-200 rounded-full z-10 border-2 border-yellow-400"></div><div class="absolute bottom-6 left-[30%] text-4xl z-20">🐚</div><div class="absolute bottom-4 left-[55%] text-3xl z-20">🐚</div></div>`, 
+            question: "Where are the shells?", 
+            answer: "on", 
+            sentence: "They're on the sand." 
+        },
+        { 
+            img: `<div class="relative w-full h-full"><div class="absolute bottom-2 left-1/2 -translate-x-1/2 text-7xl z-20">👜</div><div class="absolute bottom-8 left-1/2 -translate-x-1/2 text-5xl z-10" style="transform: translateX(-50%) rotate(15deg);">🍾</div></div>`, 
+            question: "Where is the bottle?", 
+            answer: "in", 
+            sentence: "It's in the bag." 
+        },
+        { 
+            img: `<div class="relative w-full h-full"><div class="absolute bottom-10 left-1/2 -translate-x-1/2 text-7xl z-20">🪑</div><div class="absolute bottom-2 left-1/2 -translate-x-1/2 text-4xl z-10 flex"><span style="transform: scaleX(-1);">🩴</span><span>🩴</span></div></div>`, 
+            question: "Where are the sandals?", 
+            answer: "under", 
+            sentence: "They're under the chair." 
+        },
+        { 
+            img: `<div class="relative w-full h-full flex items-end justify-center gap-3 pb-6"><div class="text-7xl z-10">🪣</div><div class="text-7xl z-10">👜</div></div>`, 
+            question: "Where is the bucket?", 
+            answer: "next to", 
+            sentence: "It's next to the bag." 
+        }
+    ];
+
+    const Stage2Data = [
+        { 
+            img: `<div class="relative w-full h-full"><div class="absolute bottom-2 left-1/2 -translate-x-1/2 text-7xl z-20">🪣</div><div class="absolute bottom-10 left-1/2 -translate-x-1/2 text-5xl z-10">🏐</div></div>`, 
+            question: "Where's the ball?", 
+            answer: "it's", 
+            sentence: "<span class='text-green-600 text-3xl block mb-1'>IT'S</span> It's in the bucket." 
+        },
+        { 
+            img: `<div class="relative w-full h-full"><div class="absolute bottom-2 left-1/2 -translate-x-1/2 w-28 h-8 bg-yellow-200 rounded-full z-10 border-2 border-yellow-400"></div><div class="absolute bottom-6 left-[30%] text-4xl z-20">🐚</div><div class="absolute bottom-4 left-[55%] text-3xl z-20">🐚</div></div>`, 
+            question: "Where are the shells?", 
+            answer: "they're", 
+            sentence: "<span class='text-purple-600 text-3xl block mb-1'>THEY'RE</span> They're on the sand." 
+        },
+        { 
+            img: `<div class="relative w-full h-full"><div class="absolute bottom-10 left-1/2 -translate-x-1/2 text-7xl z-20">🪑</div><div class="absolute bottom-2 left-1/2 -translate-x-1/2 text-5xl z-10">📷</div></div>`, 
+            question: "Where's the camera?", 
+            answer: "it's", 
+            sentence: "<span class='text-green-600 text-3xl block mb-1'>IT'S</span> It's under the bench." 
+        },
+        { 
+            img: `<div class="relative w-full h-full"><div class="absolute bottom-2 left-1/2 -translate-x-1/2 text-7xl z-20">🧰</div><div class="absolute bottom-10 left-[40%] text-5xl z-10">🪁</div><div class="absolute bottom-10 left-[60%] text-5xl z-10">🪁</div></div>`, 
+            question: "Where are the kites?", 
+            answer: "they're", 
+            sentence: "<span class='text-purple-600 text-3xl block mb-1'>THEY'RE</span> They're in the blue and yellow toy box." 
+        },
+        { 
+            img: `<div class="relative w-full h-full"><div class="absolute bottom-2 left-1/2 -translate-x-1/2 text-7xl z-20">👜</div><div class="absolute bottom-8 left-1/2 -translate-x-1/2 text-5xl z-10" style="transform: translateX(-50%) rotate(15deg);">🍾</div></div>`, 
+            question: "Where's the bottle?", 
+            answer: "it's", 
+            sentence: "<span class='text-green-600 text-3xl block mb-1'>IT'S</span> It's in the bag." 
+        },
+        { 
+            img: `<div class="relative w-full h-full"><div class="absolute bottom-2 left-1/2 -translate-x-1/2 text-7xl z-20 grayscale brightness-25">🎒</div><div class="absolute bottom-8 left-[35%] text-4xl z-10">📚</div><div class="absolute bottom-10 left-[50%] -translate-x-1/2 text-4xl z-10">📚</div><div class="absolute bottom-8 left-[65%] -translate-x-full text-4xl z-10">📚</div></div>`, 
+            question: "Where are the books?", 
+            answer: "they're", 
+            sentence: "<span class='text-purple-600 text-3xl block mb-1'>THEY'RE</span> They're in the black bag." 
+        },
+        { 
+            img: `<div class="relative w-full h-full flex items-end justify-center gap-2 pb-6"><div class="text-7xl z-10">🏰</div><div class="text-6xl z-10">⛏️</div></div>`, 
+            question: "Where's the spade?", 
+            answer: "it's", 
+            sentence: "<span class='text-green-600 text-3xl block mb-1'>IT'S</span> It's next to the sandcastle." 
+        },
+        { 
+            img: `<div class="relative w-full h-full"><div class="absolute bottom-10 left-1/2 -translate-x-1/2 text-7xl z-20">🪑</div><div class="absolute bottom-2 left-1/2 -translate-x-1/2 text-4xl z-10 flex"><span style="transform: scaleX(-1);">🩴</span><span>🩴</span></div></div>`, 
+            question: "Where are the sandals?", 
+            answer: "they're", 
+            sentence: "<span class='text-purple-600 text-3xl block mb-1'>THEY'RE</span> They're under the chair." 
+        }
+    ];
+
+    const Stage4Data = [
+        {
+            img: `<div class="relative w-full h-full"><div class="absolute bottom-2 left-1/2 -translate-x-1/2 text-7xl z-20">🪣</div><div class="absolute bottom-10 left-1/2 -translate-x-1/2 text-5xl z-10">🏐</div></div>`,
+            question: "Where's the ball?",
+            options: ["They're in the bucket.", "It's in the bucket.", "It's on the bucket."],
+            correctIndex: 1
+        },
+        {
+            img: `<div class="relative w-full h-full"><div class="absolute bottom-6 left-1/2 -translate-x-1/2 text-7xl z-10" style="transform: translateX(-50%) scaleY(0.4);">🟩</div><div class="absolute bottom-10 left-1/2 -translate-x-1/2 text-6xl z-20">👒</div></div>`,
+            question: "Where's the hat?",
+            options: ["It's under the mat.", "They're on the mat.", "It's on the mat."],
+            correctIndex: 2
+        },
+        {
+            img: `<div class="relative w-full h-full"><div class="absolute bottom-10 left-1/2 -translate-x-1/2 text-7xl z-20">🪑</div><div class="absolute bottom-2 left-1/2 -translate-x-1/2 text-5xl z-10">📷</div></div>`,
+            question: "Where's the camera?",
+            options: ["It's under the bench.", "They're under the bench.", "It's next to the bench."],
+            correctIndex: 0
+        },
+        {
+            img: `<div class="relative w-full h-full flex items-end justify-center gap-2 pb-6"><div class="text-7xl z-10">🏰</div><div class="text-6xl z-10">⛏️</div></div>`,
+            question: "Where's the spade?",
+            options: ["It's on the sandcastle.", "It's next to the sandcastle.", "They're next to the sandcastle."],
+            correctIndex: 1
+        },
+        {
+            img: `<div class="relative w-full h-full"><div class="absolute bottom-2 left-1/2 -translate-x-1/2 w-28 h-8 bg-yellow-200 rounded-full z-10 border-2 border-yellow-400"></div><div class="absolute bottom-6 left-[30%] text-4xl z-20">🐚</div><div class="absolute bottom-4 left-[55%] text-3xl z-20">🐚</div></div>`,
+            question: "Where are the shells?",
+            options: ["They're on the sand.", "It's on the sand.", "They're under the sand."],
+            correctIndex: 0
+        },
+        {
+            img: `<div class="relative w-full h-full"><div class="absolute bottom-2 left-1/2 -translate-x-1/2 text-7xl z-20">🧰</div><div class="absolute bottom-10 left-[40%] text-5xl z-10">🪁</div><div class="absolute bottom-10 left-[60%] text-5xl z-10">🪁</div></div>`,
+            question: "Where are the kites?",
+            options: ["It's in the toy box.", "They're on the toy box.", "They're in the blue and yellow toy box."],
+            correctIndex: 2
+        },
+        {
+            img: `<div class="relative w-full h-full"><div class="absolute bottom-2 left-1/2 -translate-x-1/2 text-7xl z-20 grayscale brightness-25">🎒</div><div class="absolute bottom-8 left-[35%] text-4xl z-10">📚</div><div class="absolute bottom-10 left-[50%] -translate-x-1/2 text-4xl z-10">📚</div><div class="absolute bottom-8 left-[65%] -translate-x-full text-4xl z-10">📚</div></div>`,
+            question: "Where are the books?",
+            options: ["They're in the black bag.", "It's in the black bag.", "They're next to the black bag."],
+            correctIndex: 0
+        },
+        {
+            img: `<div class="relative w-full h-full"><div class="absolute bottom-10 left-1/2 -translate-x-1/2 text-7xl z-20">🪑</div><div class="absolute bottom-2 left-1/2 -translate-x-1/2 text-4xl z-10 flex"><span style="transform: scaleX(-1);">🩴</span><span>🩴</span></div></div>`,
+            question: "Where are the sandals?",
+            options: ["They're on the chair.", "They're under the chair.", "It's under the chair."],
+            correctIndex: 1
+        }
+    ];
+
+    const StageManager = {
+        initStage: () => {
+            updateProgress();
+            
+            if (State.stage === 1) {
+                StageManager.renderStage1();
+            } else if (State.stage === 2) {
+                StageManager.renderStage2();
+            } else if (State.stage === 3 && StageManager.renderStage3) {
+                StageManager.renderStage3();
+            } else if (State.stage === 4) {
+                StageManager.renderStage4();
+            } else {
+                elements.stageContainer.innerHTML = `<div class="flex items-center justify-center h-full"><div class="text-backdrop"><h2 class="text-3xl font-bold">Stage ${State.stage} Coming Soon!</h2></div></div>`;
+            }
+        },
+
+        renderStage1: () => {
+            const q = Stage1Data[State.questionIndex];
+            
+            // Build UI for Stage 1 (Preposition Basket)
+            const html = `
+                <div class="flex flex-col items-center w-full h-full p-4 pt-16 pb-6">
+                    
+                    <!-- Picture Card -->
+                    <div class="bg-white border-[4px] border-slate-800 rounded-3xl w-40 h-40 flex items-center justify-center relative shadow-[4px_4px_0_0_#1e293b] mb-4 overflow-hidden shrink-0">
+                        ${q.img}
+                    </div>
+                    
+                    <!-- Question -->
+                    <div class="text-backdrop mb-4 text-center w-full max-w-sm shrink-0">
+                        <h2 class="text-2xl font-black text-slate-800 tracking-wide">${q.question.toUpperCase()}</h2>
+                    </div>
+                    
+                    <!-- Dropzone Basket -->
+                    <div class="flex-grow flex flex-col justify-center w-full max-w-sm relative min-h-[120px]">
+                        <div class="dropzone w-full max-w-[220px] mx-auto h-28 bg-amber-100/90 border-4 border-dashed border-amber-600 rounded-[2rem] flex flex-col items-center justify-center relative shadow-inner" id="answer-basket" data-target="${q.answer}">
+                            <span class="text-sm font-black text-amber-700 mb-1 z-10 tracking-wider">DROP YOUR ANSWER HERE</span>
+                            <span class="text-6xl z-10 drop-shadow-md">🧺</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Draggables Area -->
+                    <div class="w-full h-40 relative mt-4 shrink-0" id="draggables-container">
+                        <!-- Javascript will inject cards here -->
+                    </div>
+                </div>
+            `;
+            elements.stageContainer.innerHTML = html;
+            
+            // Add Draggables (positioned absolutely within their relative container for natural drag origins)
+            const container = document.getElementById('draggables-container');
+            const options = ['in', 'on', 'under', 'next to'];
+            
+            // Positions for a 2x2 grid inside the 40px (160px) tall container
+            const positions = [
+                { left: '25%', top: '25%' },
+                { left: '75%', top: '25%' },
+                { left: '25%', top: '75%' },
+                { left: '75%', top: '75%' }
+            ];
+
+            options.forEach((opt, idx) => {
+                const d = document.createElement('div');
+                d.className = 'draggable w-[110px] h-[50px] flex items-center justify-center text-xl shadow-[4px_4px_0_0_#1e293b]';
+                d.dataset.value = opt;
+                d.innerText = opt.toUpperCase();
+                
+                // Position them perfectly centered on their origin point
+                d.style.position = 'absolute';
+                d.style.left = positions[idx].left;
+                d.style.top = positions[idx].top;
+                d.style.transform = 'translate(-50%, -50%)'; // Center pivot
+                
+                // Save origin for snapping back
+                d.dataset.originLeft = positions[idx].left;
+                d.dataset.originTop = positions[idx].top;
+                
+                container.appendChild(d);
+            });
+        },
+
+        renderStage2: () => {
+            const q = Stage2Data[State.questionIndex];
+            
+            // Build UI for Stage 2 (It's / They're)
+            const html = `
+                <div class="flex flex-col items-center w-full h-full p-4 pt-16 pb-6">
+                    
+                    <!-- Question Above Picture -->
+                    <div class="text-backdrop mb-3 text-center w-full max-w-sm shrink-0">
+                        <h2 class="text-2xl font-black text-slate-800 tracking-wide">${q.question.toUpperCase()}</h2>
+                    </div>
+
+                    <!-- Picture Card -->
+                    <div class="bg-white border-[4px] border-slate-800 rounded-3xl w-40 h-40 flex items-center justify-center relative shadow-[4px_4px_0_0_#1e293b] mb-4 overflow-hidden shrink-0">
+                        ${q.img}
+                    </div>
+                    
+                    <!-- Dropzone Basket (Center) -->
+                    <div class="flex-grow flex flex-col justify-center w-full max-w-sm relative min-h-[100px]">
+                        <div class="dropzone w-full max-w-[280px] mx-auto h-24 bg-white/80 border-4 border-dashed border-blue-600 rounded-[1.5rem] flex flex-col items-center justify-center relative shadow-inner" id="answer-basket" data-target="${q.answer}">
+                            <span class="text-lg font-black text-blue-700 z-10 tracking-wider text-center px-4">PUT YOUR ANSWER HERE</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Draggables Area (Bottom, 2 cards) -->
+                    <div class="w-full h-32 relative mt-2 shrink-0 flex justify-center gap-6" id="draggables-container">
+                        <!-- Javascript will inject cards here -->
+                    </div>
+                </div>
+            `;
+            elements.stageContainer.innerHTML = html;
+            
+            const container = document.getElementById('draggables-container');
+            const options = ['it\'s', 'they\'re'];
+            
+            options.forEach((opt, idx) => {
+                const d = document.createElement('div');
+                // Large styled cards
+                d.className = 'draggable w-[140px] h-[70px] flex items-center justify-center text-3xl font-black shadow-[4px_4px_0_0_#1e293b] text-slate-800';
+                d.dataset.value = opt;
+                d.innerText = opt.toUpperCase();
+                
+                // Add specific colours mapping to the teaching screen for subtle visual aid
+                if (opt === "it's") {
+                    d.classList.add('bg-green-100', 'border-green-600', 'text-green-800');
+                } else {
+                    d.classList.add('bg-purple-100', 'border-purple-600', 'text-purple-800');
+                }
+                
+                // Position for 2 columns
+                d.style.position = 'absolute';
+                d.style.left = idx === 0 ? '30%' : '70%';
+                d.style.top = '50%';
+                d.style.transform = 'translate(-50%, -50%)'; // Center pivot
+                
+                // Save origin for snapping back
+                d.dataset.originLeft = d.style.left;
+                d.dataset.originTop = d.style.top;
+                
+                container.appendChild(d);
+            });
+        },
+        
+        renderStage4: () => {
+            const q = Stage4Data[State.questionIndex];
+            
+            const html = `
+                <div class="flex flex-col items-center w-full h-full p-4 pt-16 pb-4">
+                    
+                    <div class="text-backdrop mb-2 text-center w-full max-w-sm shrink-0">
+                        <h2 class="text-2xl font-black text-slate-800 tracking-wide">${q.question.toUpperCase()}</h2>
+                    </div>
+
+                    <div class="bg-white border-[4px] border-slate-800 rounded-3xl w-28 h-28 flex items-center justify-center relative shadow-[4px_4px_0_0_#1e293b] mb-4 overflow-hidden shrink-0">
+                        ${q.img}
+                    </div>
+                    
+                    <div class="flex-grow w-full max-w-sm flex flex-col justify-center gap-4 relative z-50">
+                        ${q.options.map((opt, i) => `
+                            <!-- Using interactive and pointer-events-auto so elementFromPoint works correctly -->
+                            <div class="shootable-target interactive pointer-events-auto floating bg-sky-100 border-4 border-sky-600 rounded-[1.5rem] p-3 flex items-center gap-3 shadow-[4px_4px_0_0_#0284c7] transition-all duration-200" data-index="${i}" style="animation-delay: ${i * 0.2}s">
+                                <div class="bg-sky-500 text-white font-black w-10 h-10 rounded-full flex items-center justify-center text-xl shrink-0 border-2 border-slate-800">
+                                    ${['A', 'B', 'C'][i]}
+                                </div>
+                                <div class="text-lg sm:text-xl font-bold text-slate-800 flex-grow text-left leading-tight">
+                                    ${opt}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                    
+                    <div class="mt-auto pointer-events-none text-sky-700 font-bold bg-white/80 px-4 py-2 rounded-full text-sm border-2 border-sky-200 shadow-sm animate-pulse">
+                        Aim with your hand & Pinch to Shoot! 💦
+                    </div>
+                </div>
+            `;
+            elements.stageContainer.innerHTML = html;
+        },
+
+        handleDrop: (draggableItem, dropZone) => {
+            const answer = draggableItem.dataset.value;
+            const target = dropZone.dataset.target;
+            
+            if (answer === target) {
+                // Correct!
+                draggableItem.style.display = 'none'; // hide grabbed card
+                
+                // Change basket to show answer
+                dropZone.innerHTML = `<span class="text-4xl font-black text-slate-800 drop-shadow-sm">${answer.toUpperCase()}</span>`;
+                dropZone.classList.remove('dropzone', 'border-dashed');
+                
+                // Style based on Stage
+                if (answer === "it's") {
+                    dropZone.classList.add('bg-green-400', 'border-solid', 'border-green-600', 'shadow-[0_0_20px_rgba(74,222,128,0.8)]');
+                } else if (answer === "they're") {
+                    dropZone.classList.add('bg-purple-400', 'border-solid', 'border-purple-600', 'shadow-[0_0_20px_rgba(192,132,252,0.8)]');
+                } else {
+                    dropZone.classList.add('bg-green-400', 'border-solid', 'border-green-600', 'shadow-[0_0_20px_rgba(74,222,128,0.8)]');
+                }
+                
+                // Trigger feedback with full sentence
+                let sentence = "";
+                if (State.stage === 1) sentence = Stage1Data[State.questionIndex].sentence;
+                if (State.stage === 2) sentence = Stage2Data[State.questionIndex].sentence;
+                
+                setTimeout(() => {
+                    FeedbackSystem.showCorrect(sentence);
+                }, 500);
+            } else {
+                // Wrong
+                let hint = "Look carefully at the picture!";
+                if (State.stage === 2) {
+                    hint = `<div class='flex flex-col text-left gap-2 text-[1.3rem] mx-auto w-fit text-slate-700 bg-white p-3 rounded-xl border-2 border-slate-300'>
+                                <div><span class='font-black text-green-600'>ONE</span> → IT'S</div>
+                                <div><span class='font-black text-purple-600'>TWO OR MORE</span> → THEY'RE</div>
+                            </div>`;
+                }
+
+                FeedbackSystem.showWrong(hint);
+                StageManager.resetDraggable(draggableItem);
+            }
+        },
+        
+        resetDraggable: (el) => {
+            // Snap back to origin
+            el.style.left = el.dataset.originLeft;
+            el.style.top = el.dataset.originTop;
+            el.style.transform = 'translate(-50%, -50%)'; // maintain center pivot
+            el.style.bottom = 'auto';
+            el.style.marginLeft = '0';
+            el.style.marginTop = '0';
+        },
+        
+        nextQuestion: () => {
+            State.questionIndex++;
+            
+            // dynamically resolve data source to check length
+            let currentData = [];
+            if (State.stage === 1) currentData = Stage1Data;
+            else if (State.stage === 2) currentData = Stage2Data;
+            else if (State.stage === 3 && typeof Stage3Data !== 'undefined') currentData = Stage3Data;
+            else if (State.stage === 4) currentData = Stage4Data;
+            
+            if (State.questionIndex >= currentData.length) {
+                // Stage Complete
+                State.isTransitioning = true;
+                
+                if (State.stage === 4) {
+                    document.getElementById('final-pupil-name').innerText = State.pupilName.toUpperCase();
+                    triggerCelebration();
+                    showScreen('finalCelebration');
+                    
+                    const delayedTask = document.getElementById('delayed-task');
+                    const finalBtns = document.getElementById('final-buttons');
+                    
+                    // Reset opacities just in case
+                    delayedTask.classList.remove('opacity-100');
+                    finalBtns.classList.remove('opacity-100');
+                    delayedTask.classList.add('opacity-0');
+                    finalBtns.classList.add('opacity-0');
+
+                    // 2 second delay before showing next task
+                    setTimeout(() => {
+                        delayedTask.classList.remove('opacity-0');
+                        delayedTask.classList.add('opacity-100');
+                        
+                        finalBtns.classList.remove('opacity-0');
+                        finalBtns.classList.add('opacity-100');
+                    }, 2000);
+
+                    document.getElementById('btn-home').onclick = () => window.location.reload();
+                    document.getElementById('btn-play-again').onclick = () => {
+                        State.stage = 1;
+                        State.questionIndex = 0;
+                        State.isTransitioning = false;
+                        showScreen('game');
+                        StageManager.initStage();
+                    };
+                    return;
+                }
+
+                document.getElementById('stage-complete-title').innerText = `STAGE ${State.stage} COMPLETE! ⭐`;
+                
+                const contentArea = document.getElementById('stage-complete-content');
+                if (State.stage === 1) {
+                    contentArea.innerHTML = `IN • ON • UNDER • NEXT TO`;
+                } else if (State.stage === 2) {
+                    contentArea.innerHTML = `<div class="flex flex-col items-center gap-1 w-full text-slate-700"><div class="bg-white/70 px-4 py-1 rounded-full w-full">ONE → <span class="text-green-600 font-black">IT'S</span></div><div class="bg-white/70 px-4 py-1 rounded-full w-full mt-2">TWO OR MORE → <span class="text-purple-600 font-black">THEY'RE</span></div></div>`;
+                }
+
+                showScreen('stageComplete');
+                
+                document.getElementById('btn-next-stage').onclick = () => {
+                    State.stage++;
+                    State.questionIndex = 0;
+                    State.isTransitioning = false;
+                    
+                    if (State.stage === 2) {
+                        showScreen('teachingStage2');
+                    } else {
+                        // Fallback to game for subsequent stages
+                        showScreen('game');
+                        StageManager.initStage();
+                    }
+                };
+            } else {
+                // Next Question inside current stage
+                StageManager.initStage();
+            }
+        }
+    };
+
+
+    // ==========================================
+    // INITIALIZATION & FLOW CONTROL
+    // ==========================================
+    
+    // 1. Start Button
+    document.getElementById('btn-start').addEventListener('click', async () => {
+        const nameInput = document.getElementById('pupil-name').value.trim();
+        if (nameInput) State.pupilName = nameInput;
+        else State.pupilName = "Player";
+        
+        showScreen('loading');
+        
+        // Request Camera & Init AI
+        const camSuccess = await initCamera();
+        if (camSuccess !== false) {
+            await initMediaPipe();
+        }
+
+        // Show camera layer
+        elements.video.style.display = 'block';
+        
+        // Proceed to calibration
+        startCalibration();
+    });
+
+    // 2. Calibration Sequence
+    let calibStep = 0;
+    function startCalibration() {
+        showScreen('calibration');
+        calibStep = 0;
+        updateCalibUI();
+    }
+
+    function updateCalibUI() {
+        const title = document.getElementById('calib-title');
+        const desc = document.getElementById('calib-desc');
+        const icon = document.getElementById('calib-icon');
+        const dots = document.getElementById('calib-dots').children;
+        const btn = document.getElementById('btn-calib-next');
+        
+        for(let i=0; i<3; i++) {
+            dots[i].className = i <= calibStep ? "w-3 h-3 rounded-full bg-blue-500" : "w-3 h-3 rounded-full bg-gray-300";
+        }
+
+        if (calibStep === 0) {
+            icon.innerText = "🖐️";
+            title.innerText = "Show your hand!";
+            desc.innerText = "Hold your open hand in front of the camera.";
+            btn.innerText = "NEXT";
+        } else if (calibStep === 1) {
+            icon.innerText = "👋";
+            title.innerText = "Move your hand.";
+            desc.innerText = "See the yellow circle? Move your hand to move it.";
+            btn.innerText = "NEXT";
+            // Start game loop in background to show cursor
+            if (!animationFrameId) gameLoop();
+        } else if (calibStep === 2) {
+            icon.innerText = "🤏";
+            title.innerText = "Pinch to grab!";
+            desc.innerText = "Bring your thumb and index finger together to pinch.";
+            btn.innerText = "READY!";
+            btn.classList.remove('alt');
+            btn.classList.add('bg-yellow-400', 'text-slate-800');
+        } else if (calibStep === 3) {
+            // Finish calibration, start game
+            showScreen('game');
+            StageManager.initStage();
+            return;
+        }
+    }
+
+    document.getElementById('btn-calib-next').addEventListener('click', () => {
+        calibStep++;
+        updateCalibUI();
+    });
+    
+    // Stage 2 Start Button (from teaching screen)
+    document.getElementById('btn-start-stage2').addEventListener('click', () => {
+        showScreen('game');
+        StageManager.initStage();
+    });
+
+</script>
+
+</body>
+</html>
